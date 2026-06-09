@@ -14,17 +14,26 @@
     <p>Model Context Protocol<br>Discovery Service</p>
   </div>
   <nav>
-    <div class="nav-section">Documentation</div>
+    <div class="nav-section">Protocols</div>
     <a href="index.html" class="active">Overview</a>
-    <a href="spec/protocol.html">Protocol Spec</a>
+    <div class="nav-section">MCP-DS</div>
+    <a href="spec/protocol.html">Tool Discovery</a>
     <div class="nav-sub">
       <a href="spec/protocol.html#capability-query">Capability Query</a>
       <a href="spec/protocol.html#server-card">Server Card</a>
-      <a href="spec/protocol.html#namespace-model">Namespace Model</a>
       <a href="spec/protocol.html#federated-sync">Federated Sync</a>
       <a href="spec/protocol.html#trust-model">Trust Model</a>
     </div>
-    <a href="spec/implementation.html">Implementation Guide</a>
+    <div class="nav-section">COORD</div>
+    <a href="spec/coord.html" class="active">Agent Coordination</a>
+    <div class="nav-sub">
+      <a href="spec/coord.html#lifecycle">Lifecycle</a>
+      <a href="spec/coord.html#state-handoff">State Handoff</a>
+      <a href="spec/coord.html#coordination-graph">Task Graphs</a>
+      <a href="spec/coord.html#hitl">Human-in-the-Loop</a>
+    </div>
+    <div class="nav-section">Guides</div>
+    <a href="spec/implementation.html">Implementation</a>
     <div class="nav-section">Project</div>
     <a href="https://github.com/jianran/mcp-ds">GitHub →</a>
   </nav>
@@ -59,13 +68,13 @@
     <span class="l-name">Application</span>
     <span class="l-desc">CrewAI / LangGraph / Claude SDK — agent roles, workflows, orchestration</span>
   </div>
-  <div class="stack-interface">↑ A2A agent handoff</div>
+  <div class="stack-interface">↑ <strong>COORD</strong> — task lifecycle, state handoff, HITL</div>
   <div class="stack-layer l3">
     <span class="l-num">L3</span>
-    <span class="l-name">Communication</span>
-    <span class="l-desc">MCP tools + resources — the standard tool protocol</span>
+    <span class="l-name">Coord &amp; Comm</span>
+    <span class="l-desc">Agent coordination (COORD) + tool protocol (MCP) + discovery (MCP-DS)</span>
   </div>
-  <div class="stack-interface">↑ MCP-DS ← <strong>Discovery layer</strong></div>
+  <div class="stack-interface">↑ MCP-DS — dynamic tool discovery</div>
   <div class="stack-layer l2">
     <span class="l-num">L2</span>
     <span class="l-name">Runtime</span>
@@ -97,6 +106,10 @@
   <div class="card">
     <h3>⚡ Runtime-Native</h3>
     <p>Agents discover tools dynamically, not at deploy time. The resolver caches results; the agent just says "I need X."</p>
+  </div>
+  <div class="card">
+    <h3>🔄 COORD Protocol</h3>
+    <p>The coordination layer that sits above A2A. Defines task lifecycle, state handoff, dependency graphs, and human-in-the-loop — framework-agnostic.</p>
   </div>
 </div>
 
@@ -162,8 +175,47 @@
   <tr><td><strong>v1.0</strong></td><td>Production spec + reference implementation</td><td><span class="tag tag-blue">Planned</span></td></tr>
 </table>
 
+<h2>The Full Stack</h2>
+
+<p>MCP-DS and COORD together form the missing middleware layer for interoperable agents:</p>
+
+<table>
+  <tr><th>Problem</th><th>Protocol</th><th>Status</th></tr>
+  <tr>
+    <td>How do tools speak to agents?</td>
+    <td><strong>MCP</strong></td>
+    <td><span class="tag tag-green">v1.0 — mature</span></td>
+  </tr>
+  <tr>
+    <td>How do agents find the right tool?</td>
+    <td><strong><a href="spec/protocol.html">MCP-DS</a></strong></td>
+    <td><span class="tag tag-amber">v0.1 spec draft</span></td>
+  </tr>
+  <tr>
+    <td>How do agents transport messages?</td>
+    <td><strong>A2A</strong></td>
+    <td><span class="tag tag-amber">v0.5 — emerging</span></td>
+  </tr>
+  <tr>
+    <td>How do agents coordinate work?</td>
+    <td><strong><a href="spec/coord.html">COORD</a></strong></td>
+    <td><span class="tag tag-red">v0.1 spec draft ← new</span></td>
+  </tr>
+</table>
+
+<h2>Current Status</h2>
+
+<table>
+  <tr><th>Phase</th><th>What</th><th>Status</th></tr>
+  <tr><td><strong>v0.1</strong></td><td>MCP-DS: query API + Server Card</td><td><span class="tag tag-amber">Spec draft</span></td></tr>
+  <tr><td><strong>v0.2</strong></td><td>MCP-DS: federated sync + trust chain</td><td><span class="tag tag-blue">Planned</span></td></tr>
+  <tr><td><strong>v0.1</strong></td><td>COORD: lifecycle + state + HITL</td><td><span class="tag tag-amber">Spec draft</span></td></tr>
+  <tr><td><strong>v0.2</strong></td><td>COORD: task graphs + escalation</td><td><span class="tag tag-blue">Planned</span></td></tr>
+  <tr><td><strong>v1.0</strong></td><td>Both specs production-ready + reference implementations</td><td><span class="tag tag-blue">Planned</span></td></tr>
+</table>
+
 <p style="margin-top: 40px; font-size: 13px; color: var(--fg-muted);">
-Read the <a href="spec/protocol.html">full protocol spec →</a> or the <a href="spec/implementation.html">implementation guide →</a>
+<a href="spec/protocol.html">MCP-DS Protocol Spec →</a> · <a href="spec/coord.html">COORD Coordination Protocol →</a> · <a href="spec/implementation.html">Implementation Guide →</a>
 </p>
 
 </main>
