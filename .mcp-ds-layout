@@ -1,0 +1,6 @@
+runtime/          # Reference implementation
+client/           # MCP-DS resolver SDK (Python, JS)
+registries/       # Registry server implementations
+spec/             # Protocol specification
+docs/             # User-facing docs
+examples/         # Example queries and integrations
