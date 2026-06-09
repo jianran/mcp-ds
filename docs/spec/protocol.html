@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protocol Spec — MCP-DS v0.1</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>MCP-DS</h1>
+    <p>Model Context Protocol<br>Discovery Service</p>
+  </div>
+  <nav>
+    <div class="nav-section">Documentation</div>
+    <a href="../index.html">Overview</a>
+    <a href="protocol.html" class="active">Protocol Spec</a>
+    <div class="nav-sub">
+      <a href="protocol.html#capability-query">Capability Query</a>
+      <a href="protocol.html#server-card">Server Card</a>
+      <a href="protocol.html#namespace-model">Namespace Model</a>
+      <a href="protocol.html#federated-sync">Federated Sync</a>
+      <a href="protocol.html#trust-model">Trust Model</a>
+    </div>
+    <a href="implementation.html">Implementation Guide</a>
+    <div class="nav-section">Project</div>
+    <a href="https://github.com/jianran/mcp-ds">GitHub →</a>
+  </nav>
+</aside>
+
+<main class="content">
+
+<h1>MCP-DS v0.1 — Protocol Specification</h1>
+<p class="subtitle">Status: <span class="tag tag-amber">Draft</span> · Editors: Stefan · Last updated: 2026-06-09</p>
+
+<h2 id="introduction">1. Introduction</h2>
+
+<p>MCP-DS is a federated discovery protocol for MCP servers. It lets agent runtimes find MCP servers by <strong>capability</strong> at runtime, with <strong>verifiable trust</strong> — without hard-coding endpoints in config files.</p>
+
+<h3 id="problem">1.1 Problem Statement</h3>
+
+<p>The MCP ecosystem has 14,000+ servers across dozens of directories, but:</p>
+<ul>
+  <li>There is no standard programmatic query API</li>
+  <li>There is no way to discover servers <em>by what they do</em></li>
+  <li>There is no cross-registry federation mechanism</li>
+  <li>There is no trust verification layer (41% of servers have zero auth)</li>
+  <li>Every runtime vendor builds their own discovery UX</li>
+</ul>
+
+<h3 id="goals">1.2 Design Goals</h3>
+<ul>
+  <li><strong>Capability-driven</strong>: Query by what you need, not by name</li>
+  <li><strong>Federated</strong>: No single source of truth; registries sync and compete</li>
+  <li><strong>Verifiable</strong>: Every server answer carries a trust chain</li>
+  <li><strong>Runtime-native</strong>: Agents discover tools dynamically, not at deploy time</li>
+  <li><strong>Minimal</strong>: Thin protocol layer on top of existing MCP infrastructure</li>
+</ul>
+
+<h3 id="non-goals">1.3 Non-Goals</h3>
+<ul>
+  <li>MCP-DS does not host server code — it's a metadata directory</li>
+  <li>MCP-DS does not define tool schemas — that's MCP's job</li>
+  <li>MCP-DS does not handle authentication to servers — that's MCP transport's job</li>
+</ul>
+
+<h2 id="terminology">2. Terminology</h2>
+
+<table>
+  <tr><th>Term</th><th>Definition</th></tr>
+  <tr><td><strong>Registry</strong></td><td>A service implementing the MCP-DS API</td></tr>
+  <tr><td><strong>Server</strong></td><td>An MCP server (tool provider)</td></tr>
+  <tr><td><strong>Server Card</strong></td><td><code>.well-known</code> metadata document served by an MCP host</td></tr>
+  <tr><td><strong>Publisher</strong></td><td>Entity that publishes an MCP server to a registry</td></tr>
+  <tr><td><strong>Namespace</strong></td><td>Reverse-DNS prefix tying servers to verified identities</td></tr>
+  <tr><td><strong>Capability</strong></td><td>A <code>{domain, action}</code> pair describing what a tool does</td></tr>
+  <tr><td><strong>Trust Score</strong></td><td>A 0.0–1.0 value derived from attestation chain</td></tr>
+  <tr><td><strong>Attestation</strong></td><td>A signed claim about a server (identity, security audit, etc.)</td></tr>
+</table>
+
+<h2 id="registry-api">3. Registry API</h2>
+
+<h3 id="base-url">3.1 Base URL</h3>
+<p>All registry URLs are prefixed with a configurable base:</p>
+<pre><code>https://registry.example.com/v1</code></pre>
+
+<h3 id="capability-query">3.2 Capability Query</h3>
+<p>Primary endpoint. Resolves an agent's capability need to MCP server endpoints.</p>
+
+<pre><code>GET /v1/query
+  ?domain=storage
+  &amp;action=read_file
+  &amp;auth=***
+  &amp;version_min=1.2
+  &amp;trust_min=0.7
+  &amp;limit=10</code></pre>
+
+<p><strong>Response:</strong></p>
+<pre><code class="json">{
+  "query": {
+    "domain": "storage",
+    "action": "read_file",
+    "auth": "oauth2",
+    "version_min": "1.2",
+    "trust_min": 0.7
+  },
+  "results": [
+    {
+      "server": "io.github.mcp/filesystem",
+      "uri": "mcp://filesystem.example.com",
+      "version": "1.3.0",
+      "trust": 0.92,
+      "auth": ["oauth2"],
+      "capabilities": ["read_file", "write_file", "list_files"]
+    },
+    {
+      "server": "com.internal/secure-fs",
+      "uri": "mcp://secure-fs.internal.corp:3000",
+      "version": "2.1.0",
+      "trust": 0.85,
+      "auth": ["oauth2", "mtls"],
+      "capabilities": ["read_file"]
+    }
+  ],
+  "cursor": "abc123"
+}</code></pre>
+
+<p>Results are ordered by <strong>trust score descending</strong>, then by <strong>version recency</strong>.</p>
+
+<h3 id="server-details">3.3 Server Details</h3>
+<pre><code>GET /v1/servers/io.github.mcp/filesystem</code></pre>
+
+<pre><code class="json">{
+  "namespace": "io.github.mcp",
+  "name": "filesystem",
+  "display_name": "Filesystem MCP Server",
+  "description": "Read, write, and list files on the local filesystem",
+  "publisher": {
+    "id": "io.github.mcp",
+    "name": "Model Context Protocol",
+    "verified": true,
+    "verification": {
+      "method": "github_oauth",
+      "account": "modelcontextprotocol"
+    }
+  },
+  "versions_url": "/v1/servers/io.github.mcp/filesystem/versions",
+  "trust_url": "/v1/servers/io.github.mcp/filesystem/trust",
+  "homepage": "https://github.com/modelcontextprotocol/servers"
+}</code></pre>
+
+<h3 id="server-versions">3.4 Server Versions</h3>
+<pre><code>GET /v1/servers/io.github.mcp/filesystem/versions</code></pre>
+
+<pre><code class="json">{
+  "server": "io.github.mcp/filesystem",
+  "versions": [
+    {
+      "version": "1.3.0",
+      "published_at": "2026-05-15T10:00:00Z",
+      "checksum": "sha256:abc123...",
+      "deprecated": false,
+      "packages": [
+        { "type": "npm", "url": "https://www.npmjs.com/package/@mcp/filesystem", "name": "@mcp/filesystem" },
+        { "type": "docker", "url": "https://ghcr.io/mcp/filesystem", "name": "ghcr.io/mcp/filesystem:1.3.0" }
+      ]
+    }
+  ]
+}</code></pre>
+
+<h3 id="trust-chain">3.5 Trust Chain</h3>
+<pre><code>GET /v1/servers/io.github.mcp/filesystem/trust</code></pre>
+
+<pre><code class="json">{
+  "server": "io.github.mcp/filesystem",
+  "trust_score": 0.92,
+  "attestations": [
+    {
+      "type": "namespace_verification",
+      "issuer": "registry.modelcontextprotocol.io",
+      "subject": "io.github.mcp",
+      "method": "github_oauth",
+      "signed_at": "2026-01-10T00:00:00Z",
+      "expires_at": "2027-01-10T00:00:00Z"
+    },
+    {
+      "type": "security_audit",
+      "issuer": "jfrog.io/xray",
+      "subject": "io.github.mcp/filesystem@1.3.0",
+      "result": "pass",
+      "vulnerabilities": {
+        "critical": 0, "high": 0, "medium": 2, "low": 5
+      },
+      "signed_at": "2026-05-16T00:00:00Z"
+    },
+    {
+      "type": "publisher_signed",
+      "issuer": "io.github.mcp",
+      "subject": "io.github.mcp/filesystem@1.3.0",
+      "checksum": "sha256:abc123...",
+      "signed_at": "2026-05-15T10:00:00Z"
+    }
+  ]
+}</code></pre>
+
+<h3 id="pagination">3.6 Pagination</h3>
+<p>All list endpoints use cursor-based pagination:</p>
+<pre><code class="json">{
+  "data": [...],
+  "next_cursor": "eyJvZmZzZXQiOjIwfQ=="
+}</code></pre>
+<p>Pass <code>?cursor=eyJvZmZzZXQiOjIwfQ==</code> for the next page. Absent <code>next_cursor</code> means end of results.</p>
+
+<h2 id="server-card">4. Server Card</h2>
+
+<p>Every MCP server <strong>SHOULD</strong> serve a <code>.well-known/mcp-server-card</code> document for passive discovery:</p>
+
+<pre><code>GET https://filesystem.example.com/.well-known/mcp-server-card</code></pre>
+
+<pre><code class="json">{
+  "mcp_ds_version": "0.1",
+  "server": "io.github.mcp/filesystem",
+  "version": "1.3.0",
+  "description": "Read, write, and list files on the local filesystem",
+  "capabilities": [
+    { "domain": "storage", "action": "read_file" },
+    { "domain": "storage", "action": "write_file" },
+    { "domain": "storage", "action": "list_files" }
+  ],
+  "auth": ["oauth2", "none"],
+  "transport": ["sse", "streamable-http"],
+  "registries": [
+    "https://registry.modelcontextprotocol.io",
+    "https://smithery.ai/api/mcp-ds"
+  ],
+  "checksum": "sha256:abc123..."
+}</code></pre>
+
+<p>Clients use the Server Card to verify that a server's self-description matches what the registry says about it.</p>
+
+<h2 id="namespace-model">5. Namespace Model</h2>
+
+<p>Namespaces follow reverse-DNS convention:</p>
+
+<pre><code>io.github.{username}.{repo}          — GitHub account
+com.{domain}.{path}                  — Verified domain
+org.{organization}.{project}         — Organization</code></pre>
+
+<h3>5.1 Verification Methods</h3>
+
+<table>
+  <tr><th>Method</th><th>How It Works</th><th>For</th></tr>
+  <tr><td><strong>GitHub OAuth</strong></td><td>Publisher authenticates via GitHub OAuth, claims <code>io.github.{username}</code></td><td>Individual devs</td></tr>
+  <tr><td><strong>GitHub OIDC</strong></td><td>CI/CD pipeline publishes using OIDC token</td><td>Automated publishing</td></tr>
+  <tr><td><strong>DNS Challenge</strong></td><td>Publisher proves domain by serving a TXT record</td><td>Enterprise / custom domains</td></tr>
+  <tr><td><strong>HTTP Challenge</strong></td><td>Publisher serves verification file at <code>/.well-known/mcp-ds-verify</code></td><td>Quick domain verification</td></tr>
+</table>
+
+<h2 id="federated-sync">6. Federated Sync</h2>
+
+<p>Registries can mirror or index each other.</p>
+
+<h3>6.1 Zone Transfer</h3>
+<pre><code>GET /v1/zone-transfer?since=2026-06-01T00:00:00Z</code></pre>
+<p>Returns all servers added, updated, or removed since the given timestamp. Enables incremental synchronization.</p>
+
+<h3>6.2 Remote Query</h3>
+<p>Registries can forward queries to peer registries and aggregate results:</p>
+<pre><code>GET /v1/query?domain=storage&action=read_file&include_peers=true</code></pre>
+<p>The responding registry queries its known peers and merges results, deduplicating by server identity.</p>
+
+<h2 id="trust-model">7. Trust Model</h2>
+
+<h3>7.1 Trust Score Calculation</h3>
+
+<pre><code>trust_score = W_ns * S_ns + W_sec * S_sec + W_pop * S_pop + W_age * S_age</code></pre>
+
+<p>Where:</p>
+<ul>
+  <li><code>S_ns</code> = namespace verification score (0 or 1)</li>
+  <li><code>S_sec</code> = security audit score (0–1)</li>
+  <li><code>S_pop</code> = popularity rank (0–1, normalized by downloads)</li>
+  <li><code>S_age</code> = uptime / reliability score (0–1)</li>
+</ul>
+
+<p>Default weights: <code>W_ns = 0.4, W_sec = 0.3, W_pop = 0.15, W_age = 0.15</code></p>
+
+<p>Clients <strong>MAY</strong> override weights. Registries <strong>MUST</strong> publish their default weights with every response.</p>
+
+<h3>7.2 Attestation Format</h3>
+<p>All attestations are JSON Web Signatures (JWS):</p>
+<pre><code class="json">{
+  "payload": {
+    "type": "security_audit",
+    "subject": "io.github.mcp/filesystem@1.3.0",
+    "result": "pass",
+    "ts": "2026-05-16T00:00:00Z"
+  },
+  "protected": {
+    "alg": "EdDSA",
+    "kid": "jfrog-xray-2026-01"
+  },
+  "signature": "..."
+}</code></pre>
+
+<h2 id="transport">8. Transport</h2>
+
+<p>MCP-DS registries <strong>MUST</strong> support HTTPS. They <strong>MAY</strong> additionally support:</p>
+<ul>
+  <li><strong>HTTPS</strong> (primary)</li>
+  <li><strong>gRPC</strong> (for high-throughput agent environments)</li>
+  <li><strong>IPFS / DHT</strong> (for fully decentralized discovery)</li>
+</ul>
+
+<h2 id="security">9. Security Considerations</h2>
+
+<ul>
+  <li>Registries must rate-limit query endpoints</li>
+  <li>Trust scores are advisory — the client runtime makes the final decision</li>
+  <li>Server Cards can be self-published; registries validate them before indexing</li>
+  <li>Attestation signatures MUST use expiring keys with rotation</li>
+  <li>Capability queries leak intent — registries should not log query details</li>
+</ul>
+
+<h2 id="appendix">10. Appendix: Example Queries</h2>
+
+<pre><code># Find database tools
+GET /v1/query?domain=database&action=query&trust_min=0.8
+
+# Find notification tools
+GET /v1/query?domain=notifications&action=send&auth=***
+
+# Resolve exact capability URI
+GET /v1/resolve?capability=mcp://storage/read_file%40v1
+
+# Discover servers that don't require auth (for dev)
+GET /v1/query?domain=storage&action=read_file&trust_min=0</code></pre>
+
+<p style="margin-top: 48px; color: var(--fg-muted); font-size: 13px;">
+← Back to <a href="../index.html">overview</a> · Next: <a href="implementation.html">Implementation Guide →</a>
+</p>
+
+</main>
+</body>
+</html>

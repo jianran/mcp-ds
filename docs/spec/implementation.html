@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementation Guide — MCP-DS</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>MCP-DS</h1>
+    <p>Model Context Protocol<br>Discovery Service</p>
+  </div>
+  <nav>
+    <div class="nav-section">Documentation</div>
+    <a href="../index.html">Overview</a>
+    <a href="protocol.html">Protocol Spec</a>
+    <a href="implementation.html" class="active">Implementation Guide</a>
+    <div class="nav-sub">
+      <a href="implementation.html#registry">Running a Registry</a>
+      <a href="implementation.html#client">Adding Client Support</a>
+      <a href="implementation.html#publish">Publishing a Server</a>
+    </div>
+    <div class="nav-section">Project</div>
+    <a href="https://github.com/jianran/mcp-ds">GitHub →</a>
+  </nav>
+</aside>
+
+<main class="content">
+
+<h1>Implementation Guide</h1>
+<p class="subtitle">How to build a registry, add MCP-DS support to a client, or publish a server.</p>
+
+<h2 id="registry">1. Running a Registry</h2>
+
+<h3>Minimal Registry (Single Server)</h3>
+<pre><code>docker run -p 8080:8080 mcp-ds/registry \
+  --namespace jianran \
+  --store sqlite:///data/mcp-ds.db</code></pre>
+
+<h3>Production Registry</h3>
+<pre><code>docker run -p 8080:8080 mcp-ds/registry \
+  --store postgres://user:pass@host/mcpds \
+  --namespace io.github.jianran \
+  --peers https://registry.modelcontextprotocol.io,https://smithery.ai/api/mcp-ds \
+  --sync-interval 300s \
+  --trust-weights 0.3,0.3,0.2,0.2</code></pre>
+
+<h3>Configuration Reference</h3>
+
+<table>
+  <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+  <tr><td><code>--port</code></td><td><code>8080</code></td><td>HTTP port</td></tr>
+  <tr><td><code>--store</code></td><td><code>sqlite://mcp-ds.db</code></td><td>Database backend</td></tr>
+  <tr><td><code>--peers</code></td><td><code>""</code></td><td>Comma-separated peer registry URLs</td></tr>
+  <tr><td><code>--sync-interval</code></td><td><code>300s</code></td><td>Peer sync interval</td></tr>
+  <tr><td><code>--trust-weights</code></td><td><code>0.4,0.3,0.15,0.15</code></td><td>Custom trust weights (ns, sec, pop, age)</td></tr>
+</table>
+
+<h2 id="client">2. Adding MCP-DS to an Agent Client</h2>
+
+<h3>Concept</h3>
+
+<p>The MCP client (your agent runtime) already knows how to connect to a configured MCP server over stdio or SSE. MCP-DS adds a <strong>resolver step</strong> before connection:</p>
+
+<ol>
+  <li>Agent needs a capability → query MCP-DS registry</li>
+  <li>Get back server URIs + trust scores</li>
+  <li>Select appropriate server (highest trust, lowest latency, etc.)</li>
+  <li>Connect via standard MCP transport</li>
+  <li>Cache result for TTL</li>
+</ol>
+
+<h3>Resolver Pseudocode (Python)</h3>
+
+<pre><code>class MCPDSResolver:
+    def __init__(self, registry_url: str, trust_min: float = 0.5):
+        self.registry = registry_url
+        self.trust_min = trust_min
+        self.cache = TTLCache(maxsize=256, ttl=300)
+
+    def resolve(self, domain: str, action: str, **kwargs) -&gt; MCPConnection:
+        """Resolve a capability to a connected MCP server."""
+        cache_key = f"{domain}/{action}/{kwargs}"
+        
+        if cache_key in self.cache:
+            return self._connect(self.cache[cache_key])
+
+        results = self._query({
+            "domain": domain,
+            "action": action,
+            "trust_min": self.trust_min,
+            **kwargs
+        })
+
+        if not results:
+            raise CapabilityNotFound(domain, action)
+
+        # Pick best match (highest trust, or custom policy)
+        selected = self._select(results)
+        self.cache[cache_key] = selected
+        
+        return self._connect(selected)
+
+    def _query(self, params: dict) -&gt; list:
+        return requests.get(f"{self.registry}/v1/query", params=params).json()
+
+    def _connect(self, server: dict) -&gt; MCPConnection:
+        return MCPConnection(server["uri"], auth=server.get("auth"))</code></pre>
+
+<h3>Client Configuration</h3>
+
+<pre><code class="json">{
+  "mcp_ds": {
+    "registries": [
+      "https://registry.modelcontextprotocol.io",
+      "https://mcp-ds.internal.corp"
+    ],
+    "trust_min": 0.6,
+    "cache_ttl": 300,
+    "resolve_on_startup": true
+  }
+}</code></pre>
+
+<p>When <code>resolve_on_startup</code> is true, the client pre-resolves commonly-used capabilities and caches them before the agent starts. This eliminates the cold-start latency for first tool call.</p>
+
+<h2 id="publish">3. Publishing a Server</h2>
+
+<h3>Manual (CLI)</h3>
+
+<pre><code>mcp-ds publish \
+  --server io.github.jianran/my-tool \
+  --uri mcp://my-tool.example.com \
+  --capabilities database/query,database/schema \
+  --auth oauth2</code></pre>
+
+<h3>Automated (CI/CD)</h3>
+
+<pre><code># .github/workflows/publish.yml
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish-mcp-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: mcp-ds publish --oidc-token ${{ secrets.ACTIONS_ID_TOKEN_REQUEST_TOKEN }} ...</code></pre>
+
+<h3>Server Card (Recommended)</h3>
+
+<p>Place a <code>.well-known/mcp-server-card</code> at your server's root URL. Registries discover it automatically during indexing:</p>
+
+<pre><code>https://my-tool.example.com/.well-known/mcp-server-card
+
+{
+  "mcp_ds_version": "0.1",
+  "server": "io.github.jianran/my-tool",
+  "version": "1.0.0",
+  "capabilities": [
+    { "domain": "database", "action": "query" },
+    { "domain": "database", "action": "schema" }
+  ],
+  "auth": ["oauth2"],
+  "transport": ["sse"],
+  "registries": [
+    "https://registry.modelcontextprotocol.io"
+  ]
+}</code></pre>
+
+<h3>Verification Check</h3>
+
+<p>Verify your server is discoverable:</p>
+
+<pre><code>curl "https://registry.modelcontextprotocol.io/v1/query?domain=database&action=query"
+# → should list your server</code></pre>
+
+<p style="margin-top: 48px; color: var(--fg-muted); font-size: 13px;">
+← Back to <a href="protocol.html">Protocol Spec</a> · <a href="../index.html">Overview →</a>
+</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP-DS — MCP Discovery Service</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>MCP-DS</h1>
+    <p>Model Context Protocol<br>Discovery Service</p>
+  </div>
+  <nav>
+    <div class="nav-section">Documentation</div>
+    <a href="index.html" class="active">Overview</a>
+    <a href="spec/protocol.html">Protocol Spec</a>
+    <div class="nav-sub">
+      <a href="spec/protocol.html#capability-query">Capability Query</a>
+      <a href="spec/protocol.html#server-card">Server Card</a>
+      <a href="spec/protocol.html#namespace-model">Namespace Model</a>
+      <a href="spec/protocol.html#federated-sync">Federated Sync</a>
+      <a href="spec/protocol.html#trust-model">Trust Model</a>
+    </div>
+    <a href="spec/implementation.html">Implementation Guide</a>
+    <div class="nav-section">Project</div>
+    <a href="https://github.com/jianran/mcp-ds">GitHub →</a>
+  </nav>
+</aside>
+
+<main class="content">
+
+<div class="hero">
+  <h1>MCP Discovery Service</h1>
+  <p>The DNS for agent tools. A federated protocol for finding MCP servers by capability at runtime, with verifiable trust.</p>
+</div>
+
+<h2>Why</h2>
+
+<p>MCP standardized <em>how</em> agents connect to tools — but not <em>how</em> they find them. Today, every MCP server is hard-configured in a JSON file before the agent starts:</p>
+
+<pre><code>{
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["@modelcontextprotocol/server-filesystem", "/tmp"] }
+  }
+}</code></pre>
+
+<p>This breaks when an agent needs a tool at runtime that wasn't pre-configured, when you have 14,000+ servers across 8 registries with no capability-based query, or when a server endpoint changes and every config needs updating.</p>
+
+<p><strong>MCP-DS adds a programmatic discovery layer</strong> — agent runtimes query for tools by <em>capability</em>, get back verified endpoints with trust scores, and connect dynamically.</p>
+
+<h2>Where It Fits in the Stack</h2>
+
+<div class="stack-diagram">
+  <div class="stack-layer l4">
+    <span class="l-num">L4</span>
+    <span class="l-name">Application</span>
+    <span class="l-desc">CrewAI / LangGraph / Claude SDK — agent roles, workflows, orchestration</span>
+  </div>
+  <div class="stack-interface">↑ A2A agent handoff</div>
+  <div class="stack-layer l3">
+    <span class="l-num">L3</span>
+    <span class="l-name">Communication</span>
+    <span class="l-desc">MCP tools + resources — the standard tool protocol</span>
+  </div>
+  <div class="stack-interface">↑ MCP-DS ← <strong>Discovery layer</strong></div>
+  <div class="stack-layer l2">
+    <span class="l-num">L2</span>
+    <span class="l-name">Runtime</span>
+    <span class="l-desc">LangGraph / OpenAI SDK / Smolagents — state, execution, memory</span>
+  </div>
+  <div class="stack-interface">↑ OpenAI API format</div>
+  <div class="stack-layer l1">
+    <span class="l-num">L1</span>
+    <span class="l-name">Models</span>
+    <span class="l-desc">GPT-4o / Claude / Gemini / vLLM — inference</span>
+  </div>
+</div>
+
+<h2>Design at a Glance</h2>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>🔍 Capability-Driven</h3>
+    <p>Query by <code>{domain, action, constraints}</code>, not by server name. Agents ask "who can read files?" and get back matching servers with trust scores.</p>
+  </div>
+  <div class="card">
+    <h3>🌐 Federated</h3>
+    <p>No single registry is the source of truth. Any registry can sync with any other. Clients query one, get results from many.</p>
+  </div>
+  <div class="card">
+    <h3>✅ Verifiable Trust</h3>
+    <p>Every response carries a trust chain — namespace verification, security audits, publisher signatures. The client decides the threshold.</p>
+  </div>
+  <div class="card">
+    <h3>⚡ Runtime-Native</h3>
+    <p>Agents discover tools dynamically, not at deploy time. The resolver caches results; the agent just says "I need X."</p>
+  </div>
+</div>
+
+<h2>Protocol Components</h2>
+
+<table>
+  <tr><th>Component</th><th>What It Does</th><th>Analogy</th></tr>
+  <tr>
+    <td><strong>Registry API</strong></td>
+    <td>Standard REST API that any registry implements — query servers by capability, get trust chains</td>
+    <td>DNS server</td>
+  </tr>
+  <tr>
+    <td><strong>Capability Query</strong></td>
+    <td>Resolve <code>{domain, action, inputs}</code> → <code>[MCP server URIs + trust]</code></td>
+    <td>SRV record lookup</td>
+  </tr>
+  <tr>
+    <td><strong>Server Card</strong></td>
+    <td><code>.well-known/mcp-server-card</code> — discoverable metadata on any MCP host</td>
+    <td>robots.txt</td>
+  </tr>
+  <tr>
+    <td><strong>Trust Chain</strong></td>
+    <td>Signed attestations: registry signs identity, auditor signs security, publisher signs artifacts</td>
+    <td>DNSSEC + CA chain</td>
+  </tr>
+  <tr>
+    <td><strong>Federated Sync</strong></td>
+    <td>Zone-transfer API + peer query forwarding between registries</td>
+    <td>DNS zone transfers</td>
+  </tr>
+</table>
+
+<h2>Quick Example</h2>
+
+<p>An agent needs a file-reading tool at runtime:</p>
+
+<pre><code>GET /v1/query?domain=storage&action=read_file&trust_min=0.7</code></pre>
+
+<pre><code class="json">{
+  "results": [
+    {
+      "server": "io.github.mcp/filesystem",
+      "uri": "mcp://filesystem.example.com",
+      "version": "1.3.0",
+      "trust": 0.92,
+      "auth": ["oauth2"],
+      "capabilities": ["read_file", "write_file", "list_files"]
+    }
+  ]
+}</code></pre>
+
+<p>The runtime connects to the chosen server via standard MCP transport. No config files. No pre-declared endpoints.</p>
+
+<h2>Current Status</h2>
+
+<table>
+  <tr><th>Phase</th><th>What</th><th>Status</th></tr>
+  <tr><td><strong>v0.1</strong></td><td>Server Card standard + basic query API</td><td><span class="tag tag-amber">Spec draft</span></td></tr>
+  <tr><td><strong>v0.2</strong></td><td>Federated sync protocol between registries</td><td><span class="tag tag-blue">Planned</span></td></tr>
+  <tr><td><strong>v0.3</strong></td><td>Trust chain spec (attestation format + verification)</td><td><span class="tag tag-blue">Planned</span></td></tr>
+  <tr><td><strong>v1.0</strong></td><td>Production spec + reference implementation</td><td><span class="tag tag-blue">Planned</span></td></tr>
+</table>
+
+<p style="margin-top: 40px; font-size: 13px; color: var(--fg-muted);">
+Read the <a href="spec/protocol.html">full protocol spec →</a> or the <a href="spec/implementation.html">implementation guide →</a>
+</p>
+
+</main>
+</body>
+</html>
